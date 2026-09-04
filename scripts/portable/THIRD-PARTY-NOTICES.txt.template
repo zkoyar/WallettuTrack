@@ -1,0 +1,41 @@
+WallettuTrack Portable __VERSION__ - Third-party notices
+========================================================
+
+This distribution contains WallettuTrack and third-party software. This file is
+informational; the license files embedded in each component remain controlling.
+
+WallettuTrack
+-------------
+License: GNU Affero General Public License v3.0 only (AGPL-3.0-only)
+Corresponding source: wallettutrack-source-__VERSION__.zip
+Source revision: __SOURCE_REVISION__
+Source URL (when configured by the publisher): __SOURCE_URL__
+The full license text is included as LICENSE.
+
+Production npm dependencies
+---------------------------
+The production dependency inventory and the license identifiers reported by the
+package metadata are in wallettutrack-runtime-sbom.spdx.json (SPDX 2.3).
+package-lock.json in the corresponding-source archive identifies the exact npm
+packages; upstream links are included where their package metadata provides one.
+
+MySQL container image
+---------------------
+Bundled reference: Oracle MySQL Community Server 8.4.12 for linux/__ARCH__
+The architecture-specific, immutable upstream digest used by this release is
+recorded in buildkit-mysql.metadata.json and BUILD-METADATA.json.
+
+MySQL Community Edition is distributed under GNU GPL v2, with additional terms
+or exceptions applying to some components. License and copyright files supplied
+by its publisher and by the base operating-system packages remain present inside
+the bundled image.
+
+MySQL source and license information:
+https://dev.mysql.com/downloads/mysql/
+https://www.mysql.com/about/legal/licensing/opensource-license/
+
+Oracle Container Registry image catalogue:
+https://container-registry.oracle.com/
+
+The exact locally exported image identifier and BuildKit build record for this
+package are listed in BUILD-METADATA.json and buildkit-mysql.metadata.json.

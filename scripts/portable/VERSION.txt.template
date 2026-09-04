@@ -1,0 +1,7 @@
+WallettuTrack Portable __VERSION__
+Image platform: linux/__ARCH__
+Images: wallettutrack-app:__VERSION__-__ARCH__, wallettutrack-migrate:__VERSION__-__ARCH__
+Database: wallettutrack-mysql:8.4.12-__ARCH__ included in the package
+Source revision: __SOURCE_REVISION__
+Source URL: __SOURCE_URL__
+Built at (UTC): __BUILD_TIMESTAMP__

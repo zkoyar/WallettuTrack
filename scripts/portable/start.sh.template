@@ -1,0 +1,219 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$SCRIPT_DIR"
+
+normalize_arch() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    amd64|x86_64) printf '%s' "amd64" ;;
+    arm64|aarch64) printf '%s' "arm64" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+random_hex() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex "$1"
+  else
+    od -An -N "$1" -tx1 /dev/urandom | tr -d ' \n'
+  fi
+}
+
+env_key_count() {
+  awk -v key="$1" 'index($0, key "=") == 1 { count++ } END { print count + 0 }' .env
+}
+
+env_value() {
+  awk -v key="$1" '
+    index($0, key "=") == 1 {
+      value = substr($0, length(key) + 2)
+      sub(/\r$/, "", value)
+      print value
+      exit
+    }
+  ' .env
+}
+
+set_env_value() {
+  key=$1
+  value=$2
+  temporary=".env.tmp.$$"
+  awk -v key="$key" -v value="$value" '
+    BEGIN { found = 0 }
+    index($0, key "=") == 1 {
+      if (!found) print key "=" value
+      found = 1
+      next
+    }
+    { print }
+    END { if (!found) print key "=" value }
+  ' .env > "$temporary"
+  chmod 600 "$temporary" 2>/dev/null || true
+  mv "$temporary" .env
+}
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Docker is not installed or is unavailable in PATH." >&2
+  exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+  echo "Docker is not running." >&2
+  exit 1
+fi
+if ! docker compose version >/dev/null 2>&1; then
+  echo "Docker Compose is not available." >&2
+  exit 1
+fi
+
+EXPECTED_ARCH="__ARCH__"
+ACTUAL_ARCH=$(normalize_arch "$(docker info --format '{{.Architecture}}')")
+if [ "$ACTUAL_ARCH" != "$EXPECTED_ARCH" ]; then
+  echo "The $EXPECTED_ARCH package is incompatible with Docker $ACTUAL_ARCH. Use the correct archive." >&2
+  exit 1
+fi
+
+APP_IMAGE="wallettutrack-app:__VERSION__-__ARCH__"
+MIGRATE_IMAGE="wallettutrack-migrate:__VERSION__-__ARCH__"
+MYSQL_IMAGE="wallettutrack-mysql:8.4.12-__ARCH__"
+IMAGE_ARCHIVE="wallettutrack-images-__ARCH__.tar"
+
+if ! docker image inspect "$APP_IMAGE" >/dev/null 2>&1 || \
+  ! docker image inspect "$MIGRATE_IMAGE" >/dev/null 2>&1 || \
+  ! docker image inspect "$MYSQL_IMAGE" >/dev/null 2>&1; then
+  if [ ! -f "$IMAGE_ARCHIVE" ]; then
+    echo "Image archive not found: $IMAGE_ARCHIVE" >&2
+    exit 1
+  fi
+  EXPECTED_SUM=$(awk -v file="$IMAGE_ARCHIVE" '$2 == file { print $1; exit }' SHA256SUMS.txt)
+  if [ -z "$EXPECTED_SUM" ]; then
+    echo "The image archive checksum was not found." >&2
+    exit 1
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    ACTUAL_SUM=$(sha256sum "$IMAGE_ARCHIVE" | awk '{ print $1 }')
+  else
+    ACTUAL_SUM=$(shasum -a 256 "$IMAGE_ARCHIVE" | awk '{ print $1 }')
+  fi
+  if [ "$ACTUAL_SUM" != "$EXPECTED_SUM" ]; then
+    echo "Invalid checksum: the package may be damaged." >&2
+    exit 1
+  fi
+  echo "Loading Docker images..."
+  docker load --input "$IMAGE_ARCHIVE"
+fi
+
+PORT=${PORT:-3001}
+if [ ! -f .env ]; then
+  INSTANCE_ID=$(random_hex 6)
+  umask 077
+  {
+    printf 'COMPOSE_PROJECT_NAME=wallettutrack-%s\n' "$INSTANCE_ID"
+    printf 'MYSQL_VOLUME_NAME=wallettutrack-mysql-%s\n' "$INSTANCE_ID"
+    printf 'MYSQL_ROOT_PASSWORD=%s\n' "$(random_hex 24)"
+    printf 'MYSQL_DATABASE=wallettutrack\n'
+    printf 'MYSQL_APP_USER=wallettutrack_app\n'
+    printf 'MYSQL_APP_PASSWORD=%s\n' "$(random_hex 24)"
+    printf 'APP_PORT=%s\n' "$PORT"
+    printf 'AUTH_SECRET=%s\n' "$(random_hex 32)"
+    printf 'AUTH_URL=http://localhost:%s\n' "$PORT"
+    printf 'EXCHANGE_RATE_API_BASE=https://open.er-api.com/v6\n'
+  } > .env
+  echo "Secure local configuration created."
+fi
+
+for KEY in COMPOSE_PROJECT_NAME MYSQL_VOLUME_NAME; do
+  KEY_COUNT=$(env_key_count "$KEY")
+  if [ "$KEY_COUNT" -gt 1 ]; then
+    echo "The .env file contains $KEY more than once." >&2
+    exit 1
+  fi
+done
+
+COMPOSE_PROJECT_NAME=$(env_value COMPOSE_PROJECT_NAME)
+MYSQL_VOLUME_NAME=$(env_value MYSQL_VOLUME_NAME)
+if [ -z "$COMPOSE_PROJECT_NAME" ] && [ -z "$MYSQL_VOLUME_NAME" ]; then
+  INSTANCE_ID=$(random_hex 6)
+  COMPOSE_PROJECT_NAME="wallettutrack-$INSTANCE_ID"
+  MYSQL_VOLUME_NAME="wallettutrack-mysql-$INSTANCE_ID"
+  set_env_value COMPOSE_PROJECT_NAME "$COMPOSE_PROJECT_NAME"
+  set_env_value MYSQL_VOLUME_NAME "$MYSQL_VOLUME_NAME"
+  echo "Unique portable instance identifiers added to the local configuration."
+else
+  if [ -z "$COMPOSE_PROJECT_NAME" ]; then
+    COMPOSE_PROJECT_NAME="wallettutrack-$(random_hex 6)"
+    set_env_value COMPOSE_PROJECT_NAME "$COMPOSE_PROJECT_NAME"
+  fi
+  if [ -z "$MYSQL_VOLUME_NAME" ]; then
+    MYSQL_VOLUME_NAME="wallettutrack-mysql-$(random_hex 6)"
+    set_env_value MYSQL_VOLUME_NAME "$MYSQL_VOLUME_NAME"
+  fi
+fi
+
+case "$COMPOSE_PROJECT_NAME" in
+  *[!a-z0-9_-]* | [-_]* | '')
+    echo "Invalid COMPOSE_PROJECT_NAME in .env." >&2
+    exit 1
+    ;;
+esac
+if [ "${#COMPOSE_PROJECT_NAME}" -gt 63 ]; then
+  echo "COMPOSE_PROJECT_NAME must be at most 63 characters." >&2
+  exit 1
+fi
+case "$MYSQL_VOLUME_NAME" in
+  *[!A-Za-z0-9_.-]* | [._-]* | '' | ?)
+    echo "Invalid MYSQL_VOLUME_NAME in .env." >&2
+    exit 1
+    ;;
+esac
+if [ "${#MYSQL_VOLUME_NAME}" -gt 128 ]; then
+  echo "MYSQL_VOLUME_NAME must be at most 128 characters." >&2
+  exit 1
+fi
+
+# Override inherited shell variables with the identity persisted for this copy.
+export COMPOSE_PROJECT_NAME MYSQL_VOLUME_NAME
+chmod 600 .env 2>/dev/null || true
+
+if ! docker volume inspect "$MYSQL_VOLUME_NAME" >/dev/null 2>&1; then
+  echo "Creating protected data volume $MYSQL_VOLUME_NAME..."
+  docker volume create \
+    --label "com.wallettutrack.portable=true" \
+    --label "com.wallettutrack.instance=$COMPOSE_PROJECT_NAME" \
+    "$MYSQL_VOLUME_NAME" >/dev/null
+fi
+ACTUAL_VOLUME_NAME=$(docker volume inspect --format '{{.Name}}' "$MYSQL_VOLUME_NAME")
+if [ "$ACTUAL_VOLUME_NAME" != "$MYSQL_VOLUME_NAME" ]; then
+  echo "Docker did not resolve the configured data volume exactly: $MYSQL_VOLUME_NAME" >&2
+  exit 1
+fi
+
+echo "Portable instance: $COMPOSE_PROJECT_NAME"
+echo "Protected data volume: $MYSQL_VOLUME_NAME"
+
+echo "Starting WallettuTrack..."
+docker compose config --quiet
+docker compose up -d
+
+CONTAINER_ID=$(docker compose ps -q app)
+HEALTH=""
+ATTEMPT=1
+while [ "$ATTEMPT" -le 60 ]; do
+  if [ -n "$CONTAINER_ID" ]; then
+    HEALTH=$(docker inspect --format '{{.State.Health.Status}}' "$CONTAINER_ID" 2>/dev/null || true)
+  fi
+  [ "$HEALTH" = "healthy" ] && break
+  sleep 2
+  ATTEMPT=$((ATTEMPT + 1))
+done
+
+if [ "$HEALTH" != "healthy" ]; then
+  docker compose ps
+  docker compose logs --tail 80 app
+  echo "The app did not become healthy within the expected time." >&2
+  exit 1
+fi
+
+echo ""
+echo "WallettuTrack is ready: http://localhost:$PORT"
+echo "On first access, choose Register and complete the onboarding wizard."

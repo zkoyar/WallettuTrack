@@ -1,0 +1,109 @@
+name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is missing from the .env file}
+
+services:
+  mysql:
+    image: wallettutrack-mysql:8.4.12-__ARCH__
+    platform: linux/__ARCH__
+    pull_policy: never
+    restart: unless-stopped
+    command: ["--default-time-zone=+00:00"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is missing from the .env file}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-wallettutrack}
+      MYSQL_USER: ${MYSQL_APP_USER:-wallettutrack_app}
+      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:?MYSQL_APP_PASSWORD is missing from the .env file}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - backend
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  migrate:
+    image: wallettutrack-migrate:__VERSION__-__ARCH__
+    platform: linux/__ARCH__
+    pull_policy: never
+    environment:
+      DATABASE_URL: mysql://${MYSQL_APP_USER:-wallettutrack_app}:${MYSQL_APP_PASSWORD:?MYSQL_APP_PASSWORD is missing from the .env file}@mysql:3306/${MYSQL_DATABASE:-wallettutrack}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - backend
+
+  app:
+    image: wallettutrack-app:__VERSION__-__ARCH__
+    platform: linux/__ARCH__
+    pull_policy: never
+    restart: unless-stopped
+    init: true
+    environment:
+      DATABASE_URL: mysql://${MYSQL_APP_USER:-wallettutrack_app}:${MYSQL_APP_PASSWORD:?MYSQL_APP_PASSWORD is missing from the .env file}@mysql:3306/${MYSQL_DATABASE:-wallettutrack}
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is missing from the .env file}
+      AUTH_TRUST_HOST: "true"
+      AUTH_URL: ${AUTH_URL:-http://localhost:3001}
+      EXCHANGE_RATE_API_BASE: ${EXCHANGE_RATE_API_BASE:-https://open.er-api.com/v6}
+      DEPLOYMENT_VISIBILITY: ${DEPLOYMENT_VISIBILITY:-auto}
+      REGISTRATION_MODE: ${REGISTRATION_MODE:-first-user}
+      ALLOW_PUBLIC_REGISTRATION: ${ALLOW_PUBLIC_REGISTRATION:-false}
+      PRIVACY_CONTROLLER_NAME: ${PRIVACY_CONTROLLER_NAME:-}
+      PRIVACY_CONTACT_EMAIL: ${PRIVACY_CONTACT_EMAIL:-}
+      PRIVACY_RETENTION_DAYS: ${PRIVACY_RETENTION_DAYS:-30}
+      SOURCE_CODE_URL: ${SOURCE_CODE_URL:-}
+      HOSTNAME: "0.0.0.0"
+      TZ: UTC
+    ports:
+      - "127.0.0.1:${APP_PORT:-3001}:3001"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 15s
+      retries: 6
+      start_period: 20s
+      start_interval: 5s
+    stop_grace_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - backend
+      - edge
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  mysql_data:
+    name: ${MYSQL_VOLUME_NAME:?MYSQL_VOLUME_NAME is missing from the .env file}
+    external: true
+
+networks:
+  backend:
+    internal: true
+  edge:

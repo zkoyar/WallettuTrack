@@ -1,0 +1,76 @@
+WALLETTUTRACK PORTABLE __VERSION__ - LINUX/__ARCH__
+==================================================
+
+This archive contains native Docker images for linux/__ARCH__.
+It does not contain accounts, passwords, transactions, or databases.
+
+CHOOSE THE CORRECT PACKAGE
+- amd64: Windows or Linux computers with an Intel or AMD processor.
+- arm64: Apple Silicon Macs and ARM64 Linux or Windows computers.
+
+REQUIREMENTS
+- Docker Desktop or Docker Engine with the Compose plugin.
+
+VERIFY BEFORE STARTUP
+- Windows PowerShell: .\verify.ps1
+- macOS or Linux: sh ./verify.sh
+- Verify the separate ZIP .sha256 file before extraction when it is available.
+
+OFFLINE OPERATION
+- All Docker images, including MySQL, are already included in the archive.
+- Installation and startup do not require Internet access after extracting the ZIP.
+- Without a connection, the app uses bundled exchange rates. Internet access is
+  needed only to refresh rates with the latest quotes.
+
+START ON WINDOWS
+1. Extract the entire ZIP into a folder.
+2. Start Docker Desktop.
+3. Double-click start.bat.
+4. Open http://localhost:3001.
+
+START ON macOS OR LINUX
+1. Extract the ZIP and open a terminal in its folder.
+2. Run: sh ./start.sh
+3. Open http://localhost:3001.
+
+On first access, choose Register. The onboarding wizard configures your profile,
+currency, first account, balance, and categories.
+
+STOP
+- Windows: double-click stop.bat.
+- macOS/Linux: run sh ./stop.sh.
+
+DATA AND PRIVACY
+- On first start, the scripts generate unique COMPOSE_PROJECT_NAME and
+  MYSQL_VOLUME_NAME values and persist them in .env. Separately extracted copies
+  therefore use different containers, networks, and database volumes.
+- Data is stored in the external Docker volume named by MYSQL_VOLUME_NAME in
+  .env. Compose cannot delete this protected external volume, including with
+  `docker compose down --volumes`.
+- The .env file with instance names and random credentials is created only on
+  the user's computer. Keep it with your backups: deleting it makes the next
+  start create a new, empty instance instead of reconnecting automatically.
+- Updating or stopping containers does not delete the volume.
+- For a complete transfer, preserve the volume or use the app's JSON backup.
+- To create an independent second installation from an already-used folder,
+  copy the package files without .env so fresh unique names are generated.
+- To run two installations simultaneously, also assign a different APP_PORT and
+  matching AUTH_URL to each .env file.
+
+INTEGRITY
+SHA256SUMS.txt contains SHA-256 checksums for every payload in this archive.
+A separate .sha256 file is provided next to the ZIP to verify the whole package.
+Checksums detect corruption but do not prove who published a file; obtain the
+ZIP checksum through a trusted channel before relying on it.
+
+SOURCE, LICENSES, AND BUILD RECORDS
+- LICENSE contains the WallettuTrack AGPL-3.0-only license.
+- wallettutrack-source-__VERSION__.zip contains the exact Git revision used to
+  build this release: __SOURCE_REVISION__.
+- wallettutrack-runtime-sbom.spdx.json lists production npm dependencies.
+- THIRD-PARTY-NOTICES.txt documents the bundled database and dependency sources.
+- BUILD-METADATA.json and buildkit-*.metadata.json record image identifiers and
+  BuildKit provenance metadata. These records are not a publisher signature.
+
+Build time (UTC): __BUILD_TIMESTAMP__
+Upstream source URL: __SOURCE_URL__

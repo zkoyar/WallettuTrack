@@ -1,0 +1,30 @@
+# Copy this file into the Caddy configuration and set PUBLIC_HOST.
+# Caddy automatically manages the TLS certificate and renewals.
+{$PUBLIC_HOST} {
+  encode zstd gzip
+
+  header {
+    -Server
+  }
+
+  # Reject oversized bodies at the Internet-facing boundary. The application
+  # also enforces byte limits while streaming security-sensitive payloads.
+  @smallBodies path /api/auth/* /api/register /api/locale /api/settings/password /api/account
+  request_body @smallBodies {
+    max_size 64KB
+  }
+  @csvImport path /api/import
+  request_body @csvImport {
+    max_size 6MB
+  }
+  request_body {
+    max_size 16MB
+  }
+
+  reverse_proxy 127.0.0.1:3001 {
+    # Override client-supplied values so the app can trust X-Real-IP.
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Forwarded-Proto {scheme}
+  }
+}

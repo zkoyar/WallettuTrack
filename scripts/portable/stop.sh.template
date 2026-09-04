@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$SCRIPT_DIR"
+
+# Let the identity stored in this copy's .env win over inherited shell values.
+unset COMPOSE_PROJECT_NAME MYSQL_VOLUME_NAME
+docker compose stop
+echo "WallettuTrack stopped. Data remains in the Docker volume."

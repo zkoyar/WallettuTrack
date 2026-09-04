@@ -1,0 +1,345 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum CategoryType {
+  EXPENSE
+  INCOME
+}
+
+enum Frequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+enum BudgetPeriod {
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+model User {
+  id                    String                  @id @default(cuid())
+  email                 String                  @unique
+  name                  String?
+  passwordHash          String
+  sessionVersion        Int                     @default(0)
+  baseCurrency          String                  @default("EUR") @db.Char(3)
+  locale                String                  @default("en-GB")
+  currentBalance        Decimal                 @default(0) @db.Decimal(16, 2)
+  onboardingCompletedAt DateTime?
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  categories            Category[]
+  transactions          Transaction[]
+  recurrenceRules       RecurrenceRule[]
+  budgets               Budget[]
+  plannedEvents         PlannedEvent[]
+  categoryRules         CategoryRule[]
+  goals                 Goal[]
+  accounts              Account[]
+  notificationReads     NotificationRead[]
+  tags                  Tag[]
+  reconciliations       AccountReconciliation[]
+  alertPreferences      AlertPreference[]
+  importBatches         ImportBatch[]
+}
+
+/// Persistent counters protect sign-in and registration across restarts and
+/// when the application runs on multiple instances.
+model RateLimitBucket {
+  keyHash         String   @id @db.Char(64)
+  scope           String   @db.VarChar(32)
+  attempts        Int      @default(0)
+  windowStartedAt DateTime
+  expiresAt       DateTime
+  updatedAt       DateTime @updatedAt
+
+  @@index([expiresAt])
+}
+
+model NotificationRead {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fingerprint String
+  readAt      DateTime @default(now())
+
+  @@unique([userId, fingerprint])
+  @@index([userId])
+}
+
+model Goal {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId    String?
+  account      Account?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  name         String
+  icon         String    @default("🎯")
+  targetAmount Decimal   @db.Decimal(14, 2)
+  savedAmount  Decimal   @default(0) @db.Decimal(14, 2)
+  currency     String    @default("EUR") @db.Char(3)
+  deadline     DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([accountId])
+}
+
+model Account {
+  id              String                  @id @default(cuid())
+  userId          String
+  user            User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String
+  icon            String                  @default("🏦")
+  color           String                  @default("#6366f1")
+  currentBalance  Decimal                 @default(0) @db.Decimal(14, 2)
+  sortOrder       Int                     @default(0)
+  transactions    Transaction[]
+  recurrenceRules RecurrenceRule[]
+  plannedEvents   PlannedEvent[]
+  budgets         Budget[]
+  goals           Goal[]
+  reconciliations AccountReconciliation[]
+  alertPreference AlertPreference?
+  importBatches   ImportBatch[]
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model Category {
+  id              String           @id @default(cuid())
+  userId          String
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String
+  color           String           @default("#6366f1")
+  icon            String           @default("📦")
+  type            CategoryType     @default(EXPENSE)
+  transactions    Transaction[]
+  budgets         Budget[]
+  recurrenceRules RecurrenceRule[]
+  plannedEvents   PlannedEvent[]
+  categoryRules   CategoryRule[]
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model Tag {
+  id           String           @id @default(cuid())
+  userId       String
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  color        String           @default("#6366f1")
+  transactions TransactionTag[]
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model PlannedEvent {
+  id          String       @id @default(cuid())
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId   String?
+  account     Account?     @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  categoryId  String?
+  category    Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  type        CategoryType @default(EXPENSE)
+  amount      Decimal      @db.Decimal(14, 2)
+  currency    String       @db.Char(3)
+  description String?      @db.VarChar(200)
+  notes       String?      @db.Text
+  date        DateTime
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([userId, date])
+  @@index([accountId])
+}
+
+model CategoryRule {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  keyword    String
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Transaction {
+  id               String           @id @default(cuid())
+  userId           String
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categoryId       String?
+  category         Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  type             CategoryType     @default(EXPENSE)
+  amount           Decimal          @db.Decimal(14, 2)
+  currency         String           @db.Char(3)
+  amountBase       Decimal          @db.Decimal(16, 2)
+  exchangeRate     Decimal?         @db.Decimal(18, 8)
+  date             DateTime
+  description      String?           @db.VarChar(200)
+  notes            String?           @db.Text
+  recurrenceRuleId String?
+  recurrenceRule   RecurrenceRule?  @relation(fields: [recurrenceRuleId], references: [id], onDelete: SetNull)
+  externalId       String?           @db.VarChar(255)
+  accountId        String?
+  account          Account?         @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  tagLinks         TransactionTag[]
+  transferGroupId  String?
+  importBatchId    String?
+  importBatch      ImportBatch?     @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  // MySQL allows multiple NULL values in a unique index. Manual transactions
+  // remain unrestricted, while imports and events are idempotent per user.
+  @@unique([userId, accountId, externalId])
+  // recurrenceRuleId is NULL for non-recurring transactions. For generated
+  // entries, it prevents duplicate materialization on the same UTC calendar day.
+  @@unique([userId, recurrenceRuleId, date])
+  @@index([userId, date])
+  @@index([categoryId])
+  @@index([accountId])
+  @@index([transferGroupId])
+  @@index([importBatchId])
+}
+
+model ImportBatch {
+  id            String        @id @default(cuid())
+  userId        String
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId     String
+  account       Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  fileName      String
+  source        String
+  totalRows     Int
+  importedRows  Int
+  duplicateRows Int           @default(0)
+  skippedRows   Int           @default(0)
+  createdAt     DateTime      @default(now())
+  undoneAt      DateTime?
+  transactions  Transaction[]
+
+  @@index([userId, accountId, createdAt])
+}
+
+model TransactionTag {
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  tagId         String
+  tag           Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([transactionId, tagId])
+  @@index([tagId])
+}
+
+model RecurrenceRule {
+  id                String        @id @default(cuid())
+  userId            String
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId         String?
+  account           Account?      @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  categoryId        String?
+  category          Category?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  type              CategoryType  @default(EXPENSE)
+  amount            Decimal       @db.Decimal(14, 2)
+  currency          String        @db.Char(3)
+  description       String?       @db.VarChar(200)
+  notes             String?       @db.Text
+  frequency         Frequency
+  interval          Int           @default(1)
+  daysOfWeek        String?
+  dayOfMonth        Int?
+  monthOfYear       Int?
+  startDate         DateTime
+  endDate           DateTime?
+  lastGeneratedDate DateTime?
+  active            Boolean       @default(true)
+  transactions      Transaction[]
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([userId, active])
+  @@index([accountId])
+}
+
+model Budget {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId      String?
+  account        Account?     @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  categoryId     String
+  category       Category     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  amount         Decimal      @db.Decimal(14, 2)
+  period         BudgetPeriod @default(MONTHLY)
+  alertThreshold Int          @default(80)
+  currency       String       @default("EUR") @db.Char(3)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([userId, accountId, categoryId, period])
+  @@index([userId])
+  @@index([accountId])
+}
+
+model ExchangeRate {
+  code      String   @id @db.Char(3)
+  rateToEur Decimal  @db.Decimal(18, 8)
+  fetchedAt DateTime @default(now()) @updatedAt
+}
+
+model AccountReconciliation {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId     String
+  account       Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  balanceBefore Decimal  @db.Decimal(14, 2)
+  actualBalance Decimal  @db.Decimal(14, 2)
+  difference    Decimal  @db.Decimal(15, 2)
+  notes         String?  @db.Text
+  reconciledAt  DateTime @default(now())
+
+  @@index([userId, accountId, reconciledAt])
+}
+
+model AlertPreference {
+  id                      String   @id @default(cuid())
+  userId                  String
+  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId               String   @unique
+  account                 Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  budgetAlerts            Boolean  @default(true)
+  upcomingAlerts          Boolean  @default(true)
+  upcomingDays            Int      @default(7)
+  goalAlerts              Boolean  @default(true)
+  lowBalanceEnabled       Boolean  @default(false)
+  lowBalanceThreshold     Decimal  @default(0) @db.Decimal(14, 2)
+  unusualExpenseEnabled   Boolean  @default(false)
+  unusualExpenseThreshold Decimal  @default(0) @db.Decimal(14, 2)
+  subscriptionAlerts      Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@index([userId])
+}

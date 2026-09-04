@@ -1,0 +1,15 @@
+@echo off
+setlocal
+title Start WallettuTrack
+cd /d "%~dp0"
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1"
+if errorlevel 1 (
+  echo.
+  echo ERROR: installation or startup failed.
+  pause
+  exit /b 1
+)
+
+echo.
+pause

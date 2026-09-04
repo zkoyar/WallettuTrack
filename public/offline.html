@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#6366f1" />
+    <title>WallettuTrack — Offline</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: Arial, sans-serif;
+        background: #f8fafc;
+        color: #0f172a;
+      }
+      body {
+        align-items: center;
+        display: flex;
+        justify-content: center;
+        margin: 0;
+        min-height: 100vh;
+        padding: 24px;
+      }
+      main {
+        max-width: 420px;
+        text-align: center;
+      }
+      img {
+        border-radius: 24px;
+        height: 96px;
+        width: 96px;
+      }
+      h1 {
+        margin: 24px 0 8px;
+      }
+      p {
+        color: #475569;
+        line-height: 1.5;
+      }
+      button {
+        background: #6366f1;
+        border: 0;
+        border-radius: 10px;
+        color: white;
+        cursor: pointer;
+        font: inherit;
+        margin-top: 12px;
+        padding: 12px 18px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          background: #09090b;
+          color: #fafafa;
+        }
+        p {
+          color: #a1a1aa;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/icon-192.png" alt="" />
+      <h1 id="offline-title">You are offline</h1>
+      <p id="offline-description">
+        WallettuTrack cannot load your data without a connection. Try again when your
+        network is available.
+      </p>
+      <button id="retry-button" type="button">Try again</button>
+    </main>
+    <script src="/offline.js" defer></script>
+  </body>
+</html>

@@ -1,0 +1,33 @@
+$ErrorActionPreference = "Stop"
+Set-Location -LiteralPath $PSScriptRoot
+
+$manifestPath = Join-Path $PSScriptRoot "SHA256SUMS.txt"
+if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+  throw "SHA256SUMS.txt is missing."
+}
+
+$checked = 0
+foreach ($line in Get-Content -LiteralPath $manifestPath) {
+  if (-not $line) { continue }
+  if ($line -notmatch '^([0-9a-fA-F]{64})  ([^/\\]+)$') {
+    throw "Invalid checksum manifest line: $line"
+  }
+
+  $expected = $Matches[1].ToLowerInvariant()
+  $fileName = $Matches[2]
+  $filePath = Join-Path $PSScriptRoot $fileName
+  if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
+    throw "Package file is missing: $fileName"
+  }
+
+  $actual = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($actual -ne $expected) {
+    throw "Checksum mismatch: $fileName"
+  }
+  $checked++
+}
+
+if ($checked -eq 0) {
+  throw "The checksum manifest is empty."
+}
+Write-Host "Verified $checked package files." -ForegroundColor Green

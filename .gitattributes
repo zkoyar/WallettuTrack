@@ -1,0 +1,14 @@
+* text=auto
+
+# Scripts must keep the expected line ending on Windows clones as well.
+*.sh text eol=lf
+*.sh.template text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+*.bat text eol=crlf
+*.bat.template text eol=crlf
+*.ps1 text eol=crlf
+*.ps1.template text eol=crlf

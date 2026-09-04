@@ -1,0 +1,257 @@
+param(
+  [ValidateRange(1, 65535)]
+  [int]$Port = 3001
+)
+
+$ErrorActionPreference = "Stop"
+Set-Location -LiteralPath $PSScriptRoot
+
+function New-HexSecret {
+  param([int]$ByteCount)
+
+  $bytes = New-Object byte[] $ByteCount
+  $generator = [Security.Cryptography.RandomNumberGenerator]::Create()
+  try {
+    $generator.GetBytes($bytes)
+  } finally {
+    $generator.Dispose()
+  }
+  return ([BitConverter]::ToString($bytes)).Replace("-", "").ToLowerInvariant()
+}
+
+function Get-EnvValue {
+  param(
+    [string]$Path,
+    [string]$Name
+  )
+
+  $pattern = "^$([regex]::Escape($Name))=(.*)$"
+  $values = @(
+    Get-Content -LiteralPath $Path |
+      ForEach-Object {
+        if ($_ -match $pattern) { $Matches[1].Trim() }
+      }
+  )
+  if ($values.Count -gt 1) {
+    throw "The .env file contains $Name more than once."
+  }
+  if ($values.Count -eq 0) { return $null }
+  return $values[0]
+}
+
+function Set-EnvValue {
+  param(
+    [string]$Path,
+    [string]$Name,
+    [string]$Value
+  )
+
+  $pattern = "^$([regex]::Escape($Name))="
+  $lines = [Collections.Generic.List[string]]::new()
+  $found = $false
+  foreach ($line in Get-Content -LiteralPath $Path) {
+    if ($line -match $pattern) {
+      if ($found) {
+        throw "The .env file contains $Name more than once."
+      }
+      $lines.Add("$Name=$Value")
+      $found = $true
+    } else {
+      $lines.Add($line)
+    }
+  }
+  if (-not $found) {
+    $lines.Add("$Name=$Value")
+  }
+  [IO.File]::WriteAllLines($Path, $lines, (New-Object Text.UTF8Encoding($false)))
+}
+
+function Test-DockerImage {
+  param([string]$Name)
+
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = "SilentlyContinue"
+  try {
+    & docker image inspect $Name *> $null
+    return $LASTEXITCODE -eq 0
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+}
+
+function Test-DockerVolume {
+  param([string]$Name)
+
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = "SilentlyContinue"
+  try {
+    & docker volume inspect $Name *> $null
+    return $LASTEXITCODE -eq 0
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+}
+
+function Get-NormalizedArchitecture {
+  param([string]$Value)
+  switch -Regex ($Value.ToLowerInvariant()) {
+    '^(amd64|x86_64)$' { return "amd64" }
+    '^(arm64|aarch64)$' { return "arm64" }
+    default { return $Value.ToLowerInvariant() }
+  }
+}
+
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+  throw "Docker Desktop is not installed or the docker command is unavailable."
+}
+& docker info *> $null
+if ($LASTEXITCODE -ne 0) {
+  throw "Docker Desktop is not running. Start it and try again."
+}
+& docker compose version *> $null
+if ($LASTEXITCODE -ne 0) {
+  throw "Docker Compose is not available."
+}
+
+$expectedArchitecture = "__ARCH__"
+$actualArchitecture = Get-NormalizedArchitecture ((& docker info --format "{{.Architecture}}").Trim())
+if ($actualArchitecture -ne $expectedArchitecture) {
+  throw "The $expectedArchitecture package is incompatible with Docker $actualArchitecture. Use the correct archive."
+}
+
+$appImage = "wallettutrack-app:__VERSION__-__ARCH__"
+$migrateImage = "wallettutrack-migrate:__VERSION__-__ARCH__"
+$mysqlImage = "wallettutrack-mysql:8.4.12-__ARCH__"
+$imageArchiveName = "wallettutrack-images-__ARCH__.tar"
+$imageArchive = Join-Path $PSScriptRoot $imageArchiveName
+$checksumFile = Join-Path $PSScriptRoot "SHA256SUMS.txt"
+
+if (
+  -not (Test-DockerImage $appImage) -or
+  -not (Test-DockerImage $migrateImage) -or
+  -not (Test-DockerImage $mysqlImage)
+) {
+  if (-not (Test-Path -LiteralPath $imageArchive -PathType Leaf)) {
+    throw "Image archive not found: $imageArchive"
+  }
+  $checksumLine = Get-Content -LiteralPath $checksumFile |
+    Where-Object { $_ -match ([regex]::Escape($imageArchiveName) + '$') } |
+    Select-Object -First 1
+  if (-not $checksumLine) {
+    throw "The image archive checksum was not found."
+  }
+  $expectedChecksum = ($checksumLine -split "\s+")[0].ToLowerInvariant()
+  $actualChecksum = (Get-FileHash -LiteralPath $imageArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($actualChecksum -ne $expectedChecksum) {
+    throw "Invalid checksum: the package may be damaged."
+  }
+
+  Write-Host "Loading Docker images..."
+  & docker load --input $imageArchive
+  if ($LASTEXITCODE -ne 0) {
+    throw "Docker images could not be loaded."
+  }
+}
+
+$envPath = Join-Path $PSScriptRoot ".env"
+if (-not (Test-Path -LiteralPath $envPath -PathType Leaf)) {
+  $instanceId = New-HexSecret 6
+  $settings = @(
+    "COMPOSE_PROJECT_NAME=wallettutrack-$instanceId",
+    "MYSQL_VOLUME_NAME=wallettutrack-mysql-$instanceId",
+    "MYSQL_ROOT_PASSWORD=$(New-HexSecret 24)",
+    "MYSQL_DATABASE=wallettutrack",
+    "MYSQL_APP_USER=wallettutrack_app",
+    "MYSQL_APP_PASSWORD=$(New-HexSecret 24)",
+    "APP_PORT=$Port",
+    "AUTH_SECRET=$(New-HexSecret 32)",
+    "AUTH_URL=http://localhost:$Port",
+    "EXCHANGE_RATE_API_BASE=https://open.er-api.com/v6"
+  )
+  [IO.File]::WriteAllLines(
+    $envPath,
+    $settings,
+    (New-Object Text.UTF8Encoding($false))
+  )
+  Write-Host "Secure local configuration created."
+}
+
+$projectName = Get-EnvValue -Path $envPath -Name "COMPOSE_PROJECT_NAME"
+$volumeName = Get-EnvValue -Path $envPath -Name "MYSQL_VOLUME_NAME"
+if (-not $projectName -and -not $volumeName) {
+  $instanceId = New-HexSecret 6
+  $projectName = "wallettutrack-$instanceId"
+  $volumeName = "wallettutrack-mysql-$instanceId"
+  Set-EnvValue -Path $envPath -Name "COMPOSE_PROJECT_NAME" -Value $projectName
+  Set-EnvValue -Path $envPath -Name "MYSQL_VOLUME_NAME" -Value $volumeName
+  Write-Host "Unique portable instance identifiers added to the local configuration."
+} else {
+  if (-not $projectName) {
+    $projectName = "wallettutrack-$(New-HexSecret 6)"
+    Set-EnvValue -Path $envPath -Name "COMPOSE_PROJECT_NAME" -Value $projectName
+  }
+  if (-not $volumeName) {
+    $volumeName = "wallettutrack-mysql-$(New-HexSecret 6)"
+    Set-EnvValue -Path $envPath -Name "MYSQL_VOLUME_NAME" -Value $volumeName
+  }
+}
+
+if ($projectName -notmatch '^[a-z0-9][a-z0-9_-]{0,62}$') {
+  throw "Invalid COMPOSE_PROJECT_NAME in .env. Use at most 63 lowercase letters, numbers, dashes, or underscores."
+}
+if ($volumeName -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{1,127}$') {
+  throw "Invalid MYSQL_VOLUME_NAME in .env. Use 2-128 letters, numbers, dots, dashes, or underscores."
+}
+
+# Force the persisted instance identity to win over variables inherited from the
+# calling shell, otherwise two extracted copies could address the same project.
+$env:COMPOSE_PROJECT_NAME = $projectName
+$env:MYSQL_VOLUME_NAME = $volumeName
+
+if (-not (Test-DockerVolume $volumeName)) {
+  Write-Host "Creating protected data volume $volumeName..."
+  & docker volume create `
+    --label "com.wallettutrack.portable=true" `
+    --label "com.wallettutrack.instance=$projectName" `
+    $volumeName *> $null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Docker volume $volumeName could not be created."
+  }
+}
+$actualVolumeName = (& docker volume inspect --format "{{.Name}}" $volumeName).Trim()
+if ($LASTEXITCODE -ne 0 -or $actualVolumeName -ne $volumeName) {
+  throw "Docker did not resolve the configured data volume exactly: $volumeName"
+}
+
+Write-Host "Portable instance: $projectName"
+Write-Host "Protected data volume: $volumeName"
+
+Write-Host "Starting WallettuTrack..."
+& docker compose config --quiet
+if ($LASTEXITCODE -ne 0) {
+  throw "Docker Compose configuration is invalid."
+}
+& docker compose up -d
+if ($LASTEXITCODE -ne 0) {
+  throw "Docker startup failed."
+}
+
+$containerId = ((& docker compose ps -q app) | Select-Object -First 1).Trim()
+$health = ""
+for ($attempt = 1; $attempt -le 60; $attempt++) {
+  if ($containerId) {
+    $health = (& docker inspect --format "{{.State.Health.Status}}" $containerId 2>$null).Trim()
+  }
+  if ($health -eq "healthy") { break }
+  Start-Sleep -Seconds 2
+}
+
+if ($health -ne "healthy") {
+  & docker compose ps
+  & docker compose logs --tail 80 app
+  throw "The app did not become healthy within the expected time."
+}
+
+Write-Host ""
+Write-Host "WallettuTrack is ready: http://localhost:$Port" -ForegroundColor Green
+Write-Host "On first access, choose Register and complete the onboarding wizard."

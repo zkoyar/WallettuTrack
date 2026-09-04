@@ -1,0 +1,17 @@
+@echo off
+setlocal
+title Stop WallettuTrack
+cd /d "%~dp0"
+
+rem Let the identity stored in this copy's .env win over inherited values.
+set "COMPOSE_PROJECT_NAME="
+set "MYSQL_VOLUME_NAME="
+docker compose stop
+if errorlevel 1 (
+  echo ERROR: WallettuTrack could not be stopped.
+  pause
+  exit /b 1
+)
+
+echo WallettuTrack stopped. Data remains in the Docker volume.
+pause
